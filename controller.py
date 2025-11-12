@@ -276,16 +276,50 @@ class controller(KesslerController):
         
     def asteroid_calc(self, ship_state: Dict, game_state: Dict):
         #stub function; will return the time till nearest asteroid hits, and the direction it's coming from
+        
         return 0, 0
     
     def mine_calc(self, ship_state: Dict, game_state: Dict):
         #stub function; will return the nearest mine position, and the direction of it
-        return 0, 0
+        # Find the closest mine
+        ship_pos_x = ship_state["position"][0]     # See src/kesslergame/ship.py in the KesslerGame Github
+        ship_pos_y = ship_state["position"][1]       
+        closest_mine = None
+        
+        for a in game_state["mines"]:
+            #Loop through all mines, find minimum Eudlidean distance
+            curr_dist = math.sqrt((ship_pos_x - a["position"][0])**2 + (ship_pos_y - a["position"][1])**2)
+            if closest_mine is None :
+                # Does not yet exist, so initialize first mine as the minimum. Ugh, how to do?
+                closest_mine = dict(mine = a, dist = curr_dist)
+                
+            else:    
+                # closest_asteroid exists, and is thus initialized. 
+                if closest_mine["dist"] > curr_dist:
+                    # New minimum found
+                    closest_mine["mine"] = a
+                    closest_mine["dist"] = curr_dist
+
+        if closest_mine is None:
+            mine_distance = 10000 #return arbitrarily high distance if there is no mine (enough for fuzzy logic to not care)
+            mine_theta = 0
+        else:
+            mine_distance = closest_mine["dist"]
+            #calculate angle of mine to the ship
+            mine_ship_x = ship_pos_x - closest_mine["mine"]["position"][0]
+            mine_ship_y = ship_pos_y - closest_mine["mine"]["position"][1]
+            mine_theta = math.atan2(mine_ship_y,mine_ship_x)
+
+        print(closest_mine)
+        print(mine_theta)
+
+        return mine_distance, mine_theta
 
     def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool]:
         """
         Method processed each time step by this controller.
         """
+
         #calculate bullet time and angle needed to shoot
         bullet_t, shooting_theta = self.bullet_calc(ship_state, game_state)
         asteroid_t, asteroid_theta = self.asteroid_calc(ship_state, game_state)
@@ -314,7 +348,7 @@ class controller(KesslerController):
         # And return your three outputs to the game simulation. Controller algorithm complete.
         thrust = -1000
 
-        drop_mine = False
+        drop_mine = True
         
         self.eval_frames +=1
         
