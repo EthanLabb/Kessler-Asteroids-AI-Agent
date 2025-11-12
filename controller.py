@@ -15,6 +15,7 @@ from skfuzzy import control as ctrl
 import math
 import numpy as np
 import matplotlib as plt
+import EasyGA
 
 class controller(KesslerController):
     
@@ -27,15 +28,36 @@ class controller(KesslerController):
         # Declare variables
         bullet_time = ctrl.Antecedent(np.arange(0,1.0,0.002), 'bullet_time')
         theta_delta = ctrl.Antecedent(np.arange(-1*math.pi/30,math.pi/30,0.1), 'theta_delta') # Radians due to Python
+
+        asteroid_time = ctrl.Antecedent(np.arange(0,10,0.1), 'asteroid_time') #how long till the nearest asteroid hits the ship
+        asteroid_theta = ctrl.Antecedent(np.arange(-1*math.pi/30,math.pi/30,0.1), 'asteroid_theta') #Direction of asteroid relative to ship
+
+        mine_distance = ctrl.Antecedent(np.arange(0,2000,10), 'mine_distance') #how close we are to a mine (range TBC)
+        mine_theta = ctrl.Antecedent(np.arange(0,2000,10), 'mine_theta') #Direction mine relative to ship
+
         ship_turn = ctrl.Consequent(np.arange(-180,180,1), 'ship_turn') # Degrees due to Kessler
         ship_fire = ctrl.Consequent(np.arange(-1,1,0.1), 'ship_fire')
+        ship_thrust = ctrl.Consequent(np.arange(-1000,1000,10), 'ship_thrust')
+        ship_mine = ctrl.Consequent(np.arange(-1,1,0.1), 'ship_mine')
+        ship_evade = ctrl.Consequent(np.arange(-1,1,0.1), 'ship_evade') #if above 0 prioritize evading, if below prioritize shooting
         
         #Declare fuzzy sets for bullet_time (how long it takes for the bullet to reach the intercept point)
         bullet_time['S'] = fuzz.trimf(bullet_time.universe,[0,0,0.05])
         bullet_time['M'] = fuzz.trimf(bullet_time.universe, [0,0.05,0.1])
         bullet_time['L'] = fuzz.smf(bullet_time.universe,0.0,0.1)
+
+        #Declare fuzzy sets for asteroid_time (how long it takes for the nearest asteroid to reach the ship)
+        asteroid_time['S'] = fuzz.trimf(asteroid_time.universe,[0,0,1])
+        asteroid_time['M'] = fuzz.trimf(asteroid_time.universe, [0,1.5,3])
+        asteroid_time['L'] = fuzz.smf(asteroid_time.universe,2,3)
+
+        #Declare fuzzy sets for mine_distance (how long it takes for the nearest asteroid to reach the ship)
+        mine_distance['S'] = fuzz.zmf(mine_distance.universe,150,175)
+        mine_distance['M'] = fuzz.trimf(mine_distance.universe, [175,275,375])
+        mine_distance['L'] = fuzz.smf(mine_distance.universe,350,400)
         
         # Declare fuzzy sets for theta_delta (degrees of turn needed to reach the calculated firing angle)
+        # NL - Negative Large, NM - Negative Small, etc.
         # Hard-coded for a game step of 1/30 seconds
         theta_delta['NL'] = fuzz.zmf(theta_delta.universe, -1*math.pi/30,-2*math.pi/90)
         theta_delta['NM'] = fuzz.trimf(theta_delta.universe, [-1*math.pi/30, -2*math.pi/90, -1*math.pi/90])
@@ -44,6 +66,28 @@ class controller(KesslerController):
         theta_delta['PS'] = fuzz.trimf(theta_delta.universe, [-1*math.pi/90,math.pi/90,2*math.pi/90])
         theta_delta['PM'] = fuzz.trimf(theta_delta.universe, [math.pi/90,2*math.pi/90, math.pi/30])
         theta_delta['PL'] = fuzz.smf(theta_delta.universe,2*math.pi/90,math.pi/30)
+
+        # Declare fuzzy sets for asteroid_theta (degrees of turn needed to reach the calculated firing angle)
+        # NL - Negative Large, NM - Negative Small, etc.
+        # Hard-coded for a game step of 1/30 seconds
+        asteroid_theta['NL'] = fuzz.zmf(asteroid_theta.universe, -1*math.pi/30,-2*math.pi/90)
+        asteroid_theta['NM'] = fuzz.trimf(asteroid_theta.universe, [-1*math.pi/30, -2*math.pi/90, -1*math.pi/90])
+        asteroid_theta['NS'] = fuzz.trimf(asteroid_theta.universe, [-2*math.pi/90,-1*math.pi/90,math.pi/90])
+        # asteroid_theta['Z'] = fuzz.trimf(asteroid_theta.universe, [-1*math.pi/90,0,math.pi/90])
+        asteroid_theta['PS'] = fuzz.trimf(asteroid_theta.universe, [-1*math.pi/90,math.pi/90,2*math.pi/90])
+        asteroid_theta['PM'] = fuzz.trimf(asteroid_theta.universe, [math.pi/90,2*math.pi/90, math.pi/30])
+        asteroid_theta['PL'] = fuzz.smf(asteroid_theta.universe,2*math.pi/90,math.pi/30)
+
+        # Declare fuzzy sets for mine_theta (degrees of turn needed to reach the calculated firing angle)
+        # NL - Negative Large, NM - Negative Small, etc.
+        # Hard-coded for a game step of 1/30 seconds
+        mine_theta['NL'] = fuzz.zmf(mine_theta.universe, -1*math.pi/30,-2*math.pi/90)
+        mine_theta['NM'] = fuzz.trimf(mine_theta.universe, [-1*math.pi/30, -2*math.pi/90, -1*math.pi/90])
+        mine_theta['NS'] = fuzz.trimf(mine_theta.universe, [-2*math.pi/90,-1*math.pi/90,math.pi/90])
+        # mine_theta['Z'] = fuzz.trimf(mine_theta.universe, [-1*math.pi/90,0,math.pi/90])
+        mine_theta['PS'] = fuzz.trimf(mine_theta.universe, [-1*math.pi/90,math.pi/90,2*math.pi/90])
+        mine_theta['PM'] = fuzz.trimf(mine_theta.universe, [math.pi/90,2*math.pi/90, math.pi/30])
+        mine_theta['PL'] = fuzz.smf(mine_theta.universe,2*math.pi/90,math.pi/30)
         
         # Declare fuzzy sets for the ship_turn consequent; this will be returned as turn_rate.
         # Hard-coded for a game step of 1/30 seconds
@@ -54,11 +98,26 @@ class controller(KesslerController):
         ship_turn['PS'] = fuzz.trimf(ship_turn.universe, [-60,60,120])
         ship_turn['PM'] = fuzz.trimf(ship_turn.universe, [60,120,180])
         ship_turn['PL'] = fuzz.trimf(ship_turn.universe, [120,180,180])
-        
+
+        #Declare fuzzy set for ship movement
+        #Fast-foward, Medium-Forward, etc.
+        ship_thrust['FF'] = fuzz.trimf(ship_thrust.universe, [-1000,-1000,-600])
+        ship_thrust['MF'] = fuzz.trimf(ship_thrust.universe, [-1000,-600,-300])
+        ship_thrust['SF'] = fuzz.trimf(ship_thrust.universe, [-600,-300,100])
+        ship_thrust['SB'] = fuzz.trimf(ship_thrust.universe, [-100,300,600])
+        ship_thrust['MB'] = fuzz.trimf(ship_thrust.universe, [300,600,1000])
+        ship_thrust['FB'] = fuzz.trimf(ship_thrust.universe, [600,1000,1000])
+
         #Declare singleton fuzzy sets for the ship_fire consequent; -1 -> don't fire, +1 -> fire; this will be  thresholded
         #   and returned as the boolean 'fire'
         ship_fire['N'] = fuzz.trimf(ship_fire.universe, [-1,-1,0.0])
         ship_fire['Y'] = fuzz.trimf(ship_fire.universe, [0.0,1,1]) 
+
+        #same idea as ship_fire above, just for mine and evading
+        ship_mine['N'] = fuzz.trimf(ship_mine.universe, [-1,-1,0.0])
+        ship_mine['Y'] = fuzz.trimf(ship_mine.universe, [0.0,1,1])    
+        ship_evade['N'] = fuzz.trimf(ship_evade.universe, [-1,-1,0.0])
+        ship_evade['Y'] = fuzz.trimf(ship_evade.universe, [0.0,1,1])    
                 
         #Declare each fuzzy rule
         rule1 = ctrl.Rule(bullet_time['L'] & theta_delta['NL'], (ship_turn['NL'], ship_fire['N']))
@@ -83,6 +142,7 @@ class controller(KesslerController):
         rule20 = ctrl.Rule(bullet_time['S'] & theta_delta['PM'], (ship_turn['PM'], ship_fire['Y']))
         rule21 = ctrl.Rule(bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['Y']))
      
+        rule22 = ctrl.Rule(asteroid_time['M'] & asteroid_theta['NL'] & mine_distance['L'] & mine_theta['NL'], ship_evade['Y']) #placeholder rule so we can still run
         #DEBUG
         #bullet_time.view()
         #theta_delta.view()
@@ -118,13 +178,10 @@ class controller(KesslerController):
         self.targeting_control.addrule(rule20)
         self.targeting_control.addrule(rule21)
 
-        
-        
+        self.targeting_control.addrule(rule22)
 
-    def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool]:
-        """
-        Method processed each time step by this controller.
-        """
+    #calculates bullet time and angle needed
+    def bullet_calc(self, ship_state: Dict, game_state: Dict):
         # These were the constant actions in the basic demo, just spinning and shooting.
         #thrust = 0 <- How do the values scale with asteroid velocity vector?
         #turn_rate = 90 <- How do the values scale with asteroid velocity vector?
@@ -214,12 +271,35 @@ class controller(KesslerController):
         
         # Wrap all angles to (-pi, pi)
         shooting_theta = (shooting_theta + math.pi) % (2 * math.pi) - math.pi
+
+        return bullet_t, shooting_theta
+        
+    def asteroid_calc(self, ship_state: Dict, game_state: Dict):
+        #stub function; will return the time till nearest asteroid hits, and the direction it's coming from
+        return 0, 0
+    
+    def mine_calc(self, ship_state: Dict, game_state: Dict):
+        #stub function; will return the nearest mine position, and the direction of it
+        return 0, 0
+
+    def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool]:
+        """
+        Method processed each time step by this controller.
+        """
+        #calculate bullet time and angle needed to shoot
+        bullet_t, shooting_theta = self.bullet_calc(ship_state, game_state)
+        asteroid_t, asteroid_theta = self.asteroid_calc(ship_state, game_state)
+        mine_distance, mine_theta = self.mine_calc(ship_state,game_state)
         
         # Pass the inputs to the rulebase and fire it
         shooting = ctrl.ControlSystemSimulation(self.targeting_control,flush_after_run=1)
-        
+
         shooting.input['bullet_time'] = bullet_t
         shooting.input['theta_delta'] = shooting_theta
+        shooting.input['asteroid_time'] = asteroid_t
+        shooting.input['asteroid_theta'] = asteroid_theta
+        shooting.input['mine_distance'] = mine_distance
+        shooting.input['mine_theta'] = mine_theta
         
         shooting.compute()
         
@@ -232,7 +312,7 @@ class controller(KesslerController):
             fire = False
                
         # And return your three outputs to the game simulation. Controller algorithm complete.
-        thrust = -700
+        thrust = -1000
 
         drop_mine = False
         
@@ -245,4 +325,4 @@ class controller(KesslerController):
 
     @property
     def name(self) -> str:
-        return "ScottDick Controller"
+        return "Controller"
