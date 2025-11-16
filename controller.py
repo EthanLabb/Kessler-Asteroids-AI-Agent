@@ -22,11 +22,11 @@ class controller(KesslerController):
     
         
     def __init__(self):
-        self.eval_frames = 0 #What is this?
+        self.eval_frames = 0 # How many frames have been evaluated thus far (a counter). It doesnt really get used yet but we could use it for stats later if we want
 
         # self.targeting_control is the targeting rulebase, which is static in this controller.      
         # Declare variables
-        bullet_time = ctrl.Antecedent(np.arange(0,1.0,0.002), 'bullet_time')
+        bullet_time = ctrl.Antecedent(np.arange(0,1.0,0.002), 'bullet_time') # Time (in seconds) that it will take a bullet to reach the intercept point
         theta_delta = ctrl.Antecedent(np.arange(-1*math.pi/30,math.pi/30,0.1), 'theta_delta') # Radians due to Python
 
         asteroid_time = ctrl.Antecedent(np.arange(0,10,0.1), 'asteroid_time') #how long till the nearest asteroid hits the ship
