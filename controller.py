@@ -33,7 +33,7 @@ class controller(KesslerController):
         asteroid_theta = ctrl.Antecedent(np.arange(-1*math.pi/30,math.pi/30,0.1), 'asteroid_theta') #Direction of asteroid relative to ship
 
         mine_distance = ctrl.Antecedent(np.arange(0,2000,10), 'mine_distance') #how close we are to a mine (range TBC)
-        mine_theta = ctrl.Antecedent(np.arange(0,2000,10), 'mine_theta') #Direction mine relative to ship
+        mine_theta = ctrl.Antecedent(np.arange(-math.pi, math.pi, 0.1),'mine_theta') # This should be in radians
 
         ship_turn = ctrl.Consequent(np.arange(-180,180,1), 'ship_turn') # Degrees due to Kessler
         ship_fire = ctrl.Consequent(np.arange(-1,1,0.1), 'ship_fire')
@@ -107,6 +107,7 @@ class controller(KesslerController):
         ship_thrust['SB'] = fuzz.trimf(ship_thrust.universe, [-100,300,600])
         ship_thrust['MB'] = fuzz.trimf(ship_thrust.universe, [300,600,1000])
         ship_thrust['FB'] = fuzz.trimf(ship_thrust.universe, [600,1000,1000])
+        ship_thrust['Z'] = fuzz.trimf(ship_thrust.universe, [-100, 0, 100])
 
         #Declare singleton fuzzy sets for the ship_fire consequent; -1 -> don't fire, +1 -> fire; this will be  thresholded
         #   and returned as the boolean 'fire'
@@ -143,6 +144,21 @@ class controller(KesslerController):
         rule21 = ctrl.Rule(bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['Y']))
      
         rule22 = ctrl.Rule(asteroid_time['M'] & asteroid_theta['NL'] & mine_distance['L'] & mine_theta['NL'], ship_evade['Y']) #placeholder rule so we can still run
+
+        # THRUST RULES:
+        # If asteroid will hit very soon and it's roughly in front, thrust hard backward (evade strongly)
+        rule_thrust1 = ctrl.Rule(asteroid_time['S'] & (asteroid_theta['NS'] | asteroid_theta['PS']),ship_thrust['FB'])
+        # Slowly back away if asteroid coming towards us with medium time to impact 
+        rule_thrust2 = ctrl.Rule(asteroid_time['M'] & (asteroid_theta['NS'] | asteroid_theta['PS']),ship_thrust['MB'])
+        # Dont thrust hard when asteroid impact not imminent
+        rule_thrust3 = ctrl.Rule(asteroid_time['L'],ship_thrust['Z'])
+
+        # MINE RULES:
+        # If a mine is very close, mark that we should drop a mine (and potentially evade)
+        rule_mine1 = ctrl.Rule(mine_distance['S'],ship_mine['Y'])
+        # If mines are far away, don't bother dropping one
+        rule_mine2 = ctrl.Rule(mine_distance['L'],ship_mine['N'])
+
         #DEBUG
         #bullet_time.view()
         #theta_delta.view()
@@ -179,6 +195,39 @@ class controller(KesslerController):
         self.targeting_control.addrule(rule21)
 
         self.targeting_control.addrule(rule22)
+        self.targeting_control.addrule(rule_thrust1)
+        self.targeting_control.addrule(rule_thrust2)
+        self.targeting_control.addrule(rule_thrust3)
+        self.targeting_control.addrule(rule_mine1)
+        self.targeting_control.addrule(rule_mine2)
+
+
+
+
+    # Helper functions
+    def get_closest_asteroid(self, ship_state: Dict, game_state: Dict):
+        ship_pos_x = ship_state["position"][0]     # See src/kesslergame/ship.py in the KesslerGame Github
+        ship_pos_y = ship_state["position"][1]       
+        closest_asteroid = None
+        
+        for a in game_state["asteroids"]:
+            #Loop through all asteroids, find minimum Eudlidean distance
+            
+            curr_dist = math.sqrt((ship_pos_x - a["position"][0])**2 + (ship_pos_y - a["position"][1])**2)
+            if closest_asteroid is None :
+                # Does not yet exist, so initialize first asteroid as the minimum. Ugh, how to do?
+                closest_asteroid = dict(aster = a, dist = curr_dist)
+                
+            else:    
+                # closest_asteroid exists, and is thus initialized. 
+                if closest_asteroid["dist"] > curr_dist:
+                    # New minimum found
+                    closest_asteroid["aster"] = a
+                    closest_asteroid["dist"] = curr_dist
+        return closest_asteroid
+
+
+
 
     #calculates bullet time and angle needed
     def bullet_calc(self, ship_state: Dict, game_state: Dict):
@@ -198,25 +247,11 @@ class controller(KesslerController):
         # My demonstration controller does not move the ship, only rotates it to shoot the nearest asteroid.
         # Goal: demonstrate processing of game state, fuzzy controller, intercept computation 
         # Intercept-point calculation derived from the Law of Cosines, see notes for details and citation.
+        ship_pos_x = ship_state["position"][0]
+        ship_pos_y = ship_state["position"][1]
 
         # Find the closest asteroid (disregards asteroid velocity)
-        ship_pos_x = ship_state["position"][0]     # See src/kesslergame/ship.py in the KesslerGame Github
-        ship_pos_y = ship_state["position"][1]       
-        closest_asteroid = None
-        
-        for a in game_state["asteroids"]:
-            #Loop through all asteroids, find minimum Eudlidean distance
-            curr_dist = math.sqrt((ship_pos_x - a["position"][0])**2 + (ship_pos_y - a["position"][1])**2)
-            if closest_asteroid is None :
-                # Does not yet exist, so initialize first asteroid as the minimum. Ugh, how to do?
-                closest_asteroid = dict(aster = a, dist = curr_dist)
-                
-            else:    
-                # closest_asteroid exists, and is thus initialized. 
-                if closest_asteroid["dist"] > curr_dist:
-                    # New minimum found
-                    closest_asteroid["aster"] = a
-                    closest_asteroid["dist"] = curr_dist
+        closest_asteroid = self.get_closest_asteroid(ship_state, game_state)
 
         # closest_asteroid is now the nearest asteroid object. 
         # Calculate intercept time given ship & asteroid position, asteroid velocity vector, bullet speed (not direction).
@@ -226,14 +261,18 @@ class controller(KesslerController):
         #    and the angle of the asteroid's current movement.
         # REMEMBER TRIG FUNCTIONS ARE ALL IN RADAINS!!!
         
-        
-        asteroid_ship_x = ship_pos_x - closest_asteroid["aster"]["position"][0]
+        if closest_asteroid is None:
+            # No asteroids, we should do nothing. Probably wont atually see this happen
+            return 0.0, 0.0
+        # Vector from asteriod to ship
+        asteroid_ship_x = ship_pos_x - closest_asteroid["aster"]["position"][0] 
         asteroid_ship_y = ship_pos_y - closest_asteroid["aster"]["position"][1]
-        
+
+        # Above vectors angle
         asteroid_ship_theta = math.atan2(asteroid_ship_y,asteroid_ship_x)
         
         asteroid_direction = math.atan2(closest_asteroid["aster"]["velocity"][1], closest_asteroid["aster"]["velocity"][0]) # Velocity is a 2-element array [vx,vy].
-        my_theta2 = asteroid_ship_theta - asteroid_direction
+        my_theta2 = asteroid_ship_theta - asteroid_direction 
         cos_my_theta2 = math.cos(my_theta2)
         # Need the speeds of the asteroid and bullet. speed * time is distance to the intercept point
         asteroid_vel = math.sqrt(closest_asteroid["aster"]["velocity"][0]**2 + closest_asteroid["aster"]["velocity"][1]**2)
@@ -274,10 +313,77 @@ class controller(KesslerController):
 
         return bullet_t, shooting_theta
         
+
     def asteroid_calc(self, ship_state: Dict, game_state: Dict):
-        #stub function; will return the time till nearest asteroid hits, and the direction it's coming from
-        
-        return 0, 0
+        """
+        Variables: - asteroid_time: time until a threatening asteroid reaches the ship (seconds)
+                   - asteroid_theta: angle of that asteroid relative to ship heading (radians)
+
+        We define the distance vector as asteroid -> ship, so:
+            closing_speed_toward_ship > 0  => asteroid is moving toward the ship
+            closing_speed_toward_ship <= 0 => moving away or sideways (not a threat)
+        """
+        ship_pos_x = ship_state["position"][0]
+        ship_pos_y = ship_state["position"][1]
+
+        closest_in_time = None  # Will track the asteroid with the smallest time_to_impact
+
+        for asteroid in game_state["asteroids"]:
+            asteroid_pos_x = asteroid["position"][0]
+            asteroid_pos_y = asteroid["position"][1]
+
+            # Distance vector from asteroid to ship
+            x_dist_asteroid_to_ship = ship_pos_x - asteroid_pos_x
+            y_dist_asteroid_to_ship = ship_pos_y - asteroid_pos_y
+
+            distance_to_ship = math.sqrt(x_dist_asteroid_to_ship**2 + y_dist_asteroid_to_ship**2)
+
+            asteroid_vel_x = asteroid["velocity"][0]
+            asteroid_vel_y = asteroid["velocity"][1]
+
+            if distance_to_ship > 0:
+                # Calculate the volocity of asteroid along the line defined as asteroid to ship... This is the dot product of (asteroid_vel_x, asteroid_vel_y) * (x_dist_asteroid_to_ship, y_dist_asteroid_to_ship)
+                closing_speed_toward_ship = (asteroid_vel_x * x_dist_asteroid_to_ship + asteroid_vel_y * y_dist_asteroid_to_ship) / distance_to_ship
+            else:
+                closing_speed_toward_ship = 0.0
+
+            if closing_speed_toward_ship <= 0: # Asteroid is not approaching
+                continue
+
+            time_to_impact = distance_to_ship / closing_speed_toward_ship
+
+            if (closest_in_time is None) or (time_to_impact < closest_in_time["time_to_impact"]):
+                closest_in_time = {
+                    "asteroid": asteroid,
+                    "time_to_impact": time_to_impact,
+                    "x_dist_asteroid_to_ship": x_dist_asteroid_to_ship,
+                    "y_dist_asteroid_to_ship": y_dist_asteroid_to_ship,
+                }
+
+        # No asteroid is currently moving toward us: return "safe" default values
+        if closest_in_time is None:
+            asteroid_time = 10.0   # large (safe) time
+            asteroid_theta = 0.0   # neutral angle
+            return asteroid_time, asteroid_theta
+
+        asteroid_time = closest_in_time["time_to_impact"]
+
+        # We stored asteroid->ship as (x_dist_asteroid_to_ship, y_dist_asteroid_to_ship).
+        # For the angle, we want ship->asteroid, so flip the sign:
+        x_ship_to_asteroid = -closest_in_time["x_dist_asteroid_to_ship"]
+        y_ship_to_asteroid = -closest_in_time["y_dist_asteroid_to_ship"]
+
+        angle_ship_to_asteroid = math.atan2(y_ship_to_asteroid, x_ship_to_asteroid)
+
+        ship_heading_rad = ship_state["heading"] * math.pi / 180.0
+
+        asteroid_theta = angle_ship_to_asteroid - ship_heading_rad
+
+        asteroid_theta = (asteroid_theta + math.pi) % (2 * math.pi) - math.pi
+
+        return asteroid_time, asteroid_theta
+
+
     
     def mine_calc(self, ship_state: Dict, game_state: Dict):
         #stub function; will return the nearest mine position, and the direction of it
@@ -310,8 +416,8 @@ class controller(KesslerController):
             mine_ship_y = ship_pos_y - closest_mine["mine"]["position"][1]
             mine_theta = math.atan2(mine_ship_y,mine_ship_x)
 
-        print(closest_mine)
-        print(mine_theta)
+        # print(closest_mine)
+        # print(mine_theta)
 
         return mine_distance, mine_theta
 
@@ -335,27 +441,60 @@ class controller(KesslerController):
         shooting.input['mine_distance'] = mine_distance
         shooting.input['mine_theta'] = mine_theta
         
-        shooting.compute()
         
-        # Get the defuzzified outputs
-        turn_rate = shooting.output['ship_turn']
-        
-        if shooting.output['ship_fire'] >= 0:
-            fire = True
-        else:
-            fire = False
-               
-        # And return your three outputs to the game simulation. Controller algorithm complete.
-        thrust = -1000
 
-        drop_mine = True
+        # drop_mine = False
+        shooting.compute()
+        outputs = shooting.output
+
+        turn_rate = float(outputs.get('ship_turn', 0.0))
+
+        fire_value = outputs.get('ship_fire', -1.0)
+        fire = bool(fire_value >= 0)
+
+        raw_thrust = float(outputs.get('ship_thrust', 0.0))
+        raw_thrust *= 0.3
+        MAX_THRUST = 1000.0
+        thrust = max(-MAX_THRUST, min(MAX_THRUST, raw_thrust))
+
+
+        # If asteroid is approaching soon
+        if asteroid_t < 2.0:
+            # And it's mostly behind us (more than 90 degrees off the nose)
+            if abs(asteroid_theta) > math.pi / 2:
+                # We want to move forward in this case
+                thrust = -abs(thrust) if thrust != 0 else -150.0
+
+        # # If no asteroid is near barely move
+        # if asteroid_t > 5.0:
+        #     thrust *= 0.2
+
+        mine_value = outputs.get('ship_mine', -1.0)
+        drop_mine = bool(mine_value >= 0)
         
-        self.eval_frames +=1
-        
+        evade_value = outputs.get('ship_evade', -1.0)
+        evade = (evade_value >= 0)
+        if evade and asteroid_t < 3.0:
+            # Instead of turning to shooting_theta, turn away from the asteroid.
+            # asteroid_theta is the angle from ship heading to asteroid:
+            #   > 0 means asteroid is to the left, < 0 means to the right.
+            # To turn AWAY, we rotate in the opposite direction.
+            if asteroid_theta > 0:
+                # asteroid on left -> turn right
+                turn_rate = -90.0
+            else:
+                # asteroid on right -> turn left
+                turn_rate = 90.0
+
+            # Also, don't fire while in pure evade mode
+            fire = False
+
+
+
         #DEBUG
-        print(thrust, bullet_t, shooting_theta, turn_rate, fire)
-        
-        return thrust, turn_rate, fire, drop_mine
+        # print(thrust, bullet_t, shooting_theta, turn_rate, fire)
+        # THe games thrust sign is opposite of our convention so keep the - in front of thrust 
+        return -thrust, turn_rate, fire, drop_mine
 
     @property
     def name(self) -> str:
