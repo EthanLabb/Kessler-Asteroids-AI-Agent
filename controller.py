@@ -143,7 +143,11 @@ class controller(KesslerController):
         rule20 = ctrl.Rule(bullet_time['S'] & theta_delta['PM'], (ship_turn['PM'], ship_fire['Y']))
         rule21 = ctrl.Rule(bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['Y']))
      
-        rule22 = ctrl.Rule(asteroid_time['M'] & asteroid_theta['NL'] & mine_distance['L'] & mine_theta['NL'], ship_evade['Y']) #placeholder rule so we can still run
+
+        # EVADE RULES:
+        rule_evade1 = ctrl.Rule(mine_distance['S'] | asteroid_time['S'], ship_evade['Y'])
+        rule_evade2 = ctrl.Rule(mine_distance['M'] | asteroid_time['M'], ship_evade['N'])
+        rule_evade3 = ctrl.Rule(mine_distance['L'] | asteroid_time['L'], ship_evade['N'])
 
         # THRUST RULES:
         # If asteroid will hit very soon and it's roughly in front, thrust hard backward (evade strongly)
@@ -194,12 +198,52 @@ class controller(KesslerController):
         self.targeting_control.addrule(rule20)
         self.targeting_control.addrule(rule21)
 
-        self.targeting_control.addrule(rule22)
+        self.targeting_control.addrule(rule_evade1)
+        self.targeting_control.addrule(rule_evade2)
+        self.targeting_control.addrule(rule_evade3)
         self.targeting_control.addrule(rule_thrust1)
         self.targeting_control.addrule(rule_thrust2)
         self.targeting_control.addrule(rule_thrust3)
         self.targeting_control.addrule(rule_mine1)
         self.targeting_control.addrule(rule_mine2)
+
+
+
+        #Rules for rect safety evaluation control system
+        #This is too expensive to actually implement unfortunately, unless we throttle it so it only fires every second or so, but at that point the hardcoded method is probably better anyways.
+        """
+        rect_mine_exists = ctrl.Antecedent(np.arange(-1,1,0.1), 'rect_mine_exists')
+        rect_asteroid_count = ctrl.Antecedent(np.arange(0,100,1), 'rect_asteroid_count') 
+        rect_asteroid_time = ctrl.Antecedent(np.arange(0,10,0.1), 'rect_asteroid_time')
+        rect_safety_rating = ctrl.Consequent(np.arange(0,1,0.01),'rect_safety_rating')
+
+        #Mine exists fuzzy set
+        rect_mine_exists['N'] = fuzz.trimf(rect_mine_exists.universe, [-1,-1,0.0])
+        rect_mine_exists['Y'] = fuzz.trimf(rect_mine_exists.universe, [0.0,1,1])  
+
+        #Fuzzy Sets for asteroid_time
+        rect_asteroid_time['S'] = fuzz.trimf(rect_asteroid_time.universe,[0,0,3])
+        rect_asteroid_time['M'] = fuzz.trimf(rect_asteroid_time.universe, [0,3,6])
+        rect_asteroid_time['L'] = fuzz.smf(rect_asteroid_time.universe,5,6)
+
+        #Fuzzy Sets for asteroid_count
+        #small medium large
+        rect_asteroid_count['S'] = fuzz.trimf(rect_asteroid_count.universe,[0,0,2])
+        rect_asteroid_count['M'] = fuzz.trimf(rect_asteroid_count.universe, [2,3,4])
+        rect_asteroid_count['L'] = fuzz.smf(rect_asteroid_count.universe,3,6)
+
+        #Fuzzy Sets for asteroid_time
+        #low medium high
+        rect_safety_rating['L'] = fuzz.trimf(rect_safety_rating.universe,[0,0,0.5])
+        rect_safety_rating['M'] = fuzz.trimf(rect_safety_rating.universe, [0,0.5,1])
+        rect_safety_rating['H'] = fuzz.trimf(rect_safety_rating.universe, [0.5,1,1])
+
+        #rules for safety rating
+        rule_safety_1 = ctrl.Rule(rect_mine_exists['Y'] | rect_asteroid_time['S'] | rect_asteroid_count['L'], rect_safety_rating['L'])
+        #rule_safety_2 = ctrl.Rule((rect_mine_exists['N'] & rect_asteroid_time['M'] & rect_asteroid_count['S']) | (rect_mine_exists['N'] & rect_asteroid_time['L'] & rect_asteroid_count['M']), rect_safety_rating['M'])
+        rule_safety_3 = ctrl.Rule(rect_mine_exists['N'] & rect_asteroid_time['L'] & rect_asteroid_count['S'], rect_safety_rating['H'])
+        self.safety_control = ctrl.ControlSystem([rule_safety_1, rule_safety_3])
+        """
 
 
 
@@ -225,8 +269,6 @@ class controller(KesslerController):
                     closest_asteroid["aster"] = a
                     closest_asteroid["dist"] = curr_dist
         return closest_asteroid
-
-
 
 
     #calculates bullet time and angle needed
@@ -384,6 +426,166 @@ class controller(KesslerController):
         return asteroid_time, asteroid_theta
 
 
+    def rect_calc(self, ship_state: Dict, game_state: Dict):
+        #!!!!!!Todo: I'm not 100% sure what happens when mapsize is indivisible by grid size, want to see what happens in these cases
+
+        #This function divides the gamespace into a grid of squares, and fuzzily rate those square on how safe they are
+        #By using this function the ship should be able to determine if it should move or not. 
+        #If there are no safe squares nearby it should probably try to shoot an asteroid to escape the trap
+
+        #These rects should be larger than the ship itself
+        #For this we define 20x20 grid
+        gridsize = 20
+        mapsizex = 1000 #!!!!!pull this from the gamestate instead of hardcoding!
+        mapsizey = 800  #!!!!!pull this from the gamestate instead of hardcoding!
+        rectsizex = mapsizex/gridsize
+        rectsizey = mapsizey/gridsize
+
+        #generate square grid
+        grid = [[{"mineexists": False, "asteroids_incoming": 0, "asteroids_time":  1000}for i in range(gridsize)] for j in range(gridsize)] 
+        safetygrid = [[0]*gridsize]*gridsize #this one will contain our actual ratings from fuzzy logic
+        minegrid = [[0]*gridsize]*gridsize #will contain a mine score (i.e. if a lot of asteroids are going to pass through this point)
+
+        #return values
+        currentsafety = 0 #weighted safety score; see below
+        currentmine = 0 #just returning the amount of asteroids incoming
+        bestdirection = 0 #will be a radian
+        #Loop through every point in the grid
+        for i in range(len(grid)):
+            for j in range(len(grid[i])):
+                #define the bounds for our square
+                x_min = rectsizex * (i)
+                x_max = rectsizex * (i+1)
+                y_min = rectsizey * (j)
+                y_max = rectsizey * (j+1)
+                
+                #===logic for mines===
+                #tests if a mine exists in this area
+                for a in game_state["mines"]:
+                    if (a["position"][0] > x_min and a["position"][0] < x_max and a["position"][1] > y_min and a["position"][1] < y_max):
+                        grid[i][j]["mineexists"] = True
+                        break
+            
+                #===logic for asteroids===
+                for asteroid in game_state["asteroids"]:
+                    #asteroid["position"][0] #x pos
+                    #asteroid["position"][1] #y pos
+                    #asteroid["velocity"][0] #x vel
+                    #asteroid["velocity"][1] #y vel
+
+                    #calculate direction of asteroid velocity
+                    asteroid_direction = math.atan2(asteroid["velocity"][1], asteroid["velocity"][0])
+
+                    #find the angles to the different corners of the square based on the asteroid position
+                    angle1 = math.atan2(y_min - asteroid["position"][1], x_min - asteroid["position"][0])
+                    angle2 = math.atan2(y_max - asteroid["position"][1], x_min - asteroid["position"][0])
+                    angle3 = math.atan2(y_min - asteroid["position"][1], x_max - asteroid["position"][0])
+                    angle4 = math.atan2(y_max - asteroid["position"][1], x_max - asteroid["position"][0])
+
+                    #find the max and min of these angles
+                    anglemax = max(angle1, angle2, angle3, angle4)
+                    anglemin = min(angle1, angle2, angle3, angle4)
+
+                    #if the asteroid direction isn't in this angle range, it's not going to intersect and we move onto the next asteroid
+                    if((asteroid_direction > anglemax) or (asteroid_direction < anglemin)):
+                        continue
+                    
+                    #if we get here the asteroid is on collision path, update grid variable accordingly
+                    grid[i][j]["asteroids_incoming"] = grid[i][j]["asteroids_incoming"] + 1
+
+
+                    #calculate magnitude of asteroid velocity
+                    asteroid_speed = abs(sqrt(asteroid["velocity"][1]**2 + asteroid["velocity"][0]**2))
+
+                    #calculate asteroid distance to center of square
+                    asteroid_dist = abs(sqrt((x_min+rectsizex/2-asteroid["position"][0])**2+(y_min+rectsizey/2-asteroid["position"][1])**2))
+
+                    #calculate intersect time
+                    #The game speed is 30 ticks per second, scale accordingly
+                    intersect_time = asteroid_dist/asteroid_speed*30
+                    
+                    #update to lowest
+                    if grid[i][j]["asteroids_time"] > intersect_time:
+                        grid[i][j]["asteroids_time"] = intersect_time
+                    
+
+                #calculate safety grid values
+                #higher rating is worse
+                
+                #mine rating input:
+                if grid[i][j]["mineexists"] == True:
+                    #obviously if there is a mine the safe isn't safe, but it should also set nearby spaces to be unsafe aswell
+                    safetygrid[i][j] += 1000
+                    for n in range(3):
+                        for m in range(3):
+                            #temporary variables for wrapping
+                            x = i
+                            y = j
+
+                            #positive wrapping
+                            try:
+                                safetygrid[i+n]
+                                x = i
+                            except: 
+                                x = 0
+                                
+                            try:
+                                safetygrid[j+n]
+                                y = j
+                            except: 
+                                y = 0                               
+                            safetygrid[x+n][y+m] += 1000
+
+                            #negative wrapping
+                            try:
+                                safetygrid[i-n]
+                                x = i
+                            except: 
+                                x = len(grid)
+                                
+                            try:
+                                safetygrid[j-n]
+                                y = j
+                            except: 
+                                y = len(grid[0])     
+
+                            safetygrid[i-n][j-m] += 1000
+
+                #other rating input:
+                safetygrid[i][j] += (grid[i][j]["asteroids_time"]**-1)*5
+                safetygrid[i][j] = safetygrid[i][j] + grid[i][j]["asteroids_incoming"]
+                minegrid[i][j] = grid[i][j]["asteroids_incoming"]
+                
+        #evaluate the options
+        #find the lowest value
+        for i in range(len(grid)):
+            for j in range(len(grid[i])):
+                safetygrid[i][j]
+
+        #find the current safety status and mine status of the ship, there's probably a more efficient way of doing this but this works for now
+        ship_pos_x = ship_state["position"][0]
+        ship_pos_y = ship_state["position"][1]    
+        for i in range(len(grid)):
+            for j in range(len(grid[i])):
+                x_min = rectsizex * (i)
+                x_max = rectsizex * (i+1)
+                y_min = rectsizey * (j)
+                y_max = rectsizey * (j+1)
+                if ship_pos_x < x_max and ship_pos_x > x_min and ship_pos_y < y_max and ship_pos_y > y_min:
+                    #current ship square, find related results
+                    currentsafety = safetygrid[i][j]
+                    currentmine = minegrid[i][j]
+                    #redefine these values for next function
+                    ship_pos_x = i
+                    ship_pos_y = j
+                    break
+        
+        #evaluate a few rects out in each direction and give a safety rating
+        
+
+        bestdirection = 0
+
+        return currentsafety, currentmine, bestdirection
     
     def mine_calc(self, ship_state: Dict, game_state: Dict):
         #stub function; will return the nearest mine position, and the direction of it
@@ -430,6 +632,7 @@ class controller(KesslerController):
         bullet_t, shooting_theta = self.bullet_calc(ship_state, game_state)
         asteroid_t, asteroid_theta = self.asteroid_calc(ship_state, game_state)
         mine_distance, mine_theta = self.mine_calc(ship_state,game_state)
+        self.rect_calc(ship_state,game_state)
         
         # Pass the inputs to the rulebase and fire it
         shooting = ctrl.ControlSystemSimulation(self.targeting_control,flush_after_run=1)
@@ -439,7 +642,7 @@ class controller(KesslerController):
         shooting.input['asteroid_time'] = asteroid_t
         shooting.input['asteroid_theta'] = asteroid_theta
         shooting.input['mine_distance'] = mine_distance
-        shooting.input['mine_theta'] = mine_theta
+        #shooting.input['mine_theta'] = mine_theta
         
         
 
