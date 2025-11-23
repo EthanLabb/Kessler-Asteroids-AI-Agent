@@ -67,8 +67,8 @@ class controller(KesslerController):
         currentmine['L'] = fuzz.smf(currentmine.universe,10,20)
 
         #Declare fuzzy sets for currentmine (mine rating via how many asteroids are incoming)
-        currentrisk['S'] = fuzz.trimf(currentrisk.universe,[0,0,20])
-        currentrisk['L'] = fuzz.trimf(currentrisk.universe,[15,50,50])
+        currentrisk['S'] = fuzz.trimf(currentrisk.universe,[0,0,30])
+        currentrisk['L'] = fuzz.trimf(currentrisk.universe,[25,50,50])
         
         # Declare fuzzy sets for theta_delta (degrees of turn needed to reach the calculated firing angle)
         # NL - Negative Large, NM - Negative Small, etc.
@@ -174,19 +174,23 @@ class controller(KesslerController):
         rule21 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N'], ship_thrust['Z']))
      
         #evade movement rules/thrust rules
-        rule22 = ctrl.Rule(safetystatus['N'] & bestdirection['PL'], (ship_turn['PL'], ship_thrust['Z'], ship_mine['N']))
-        rule23 = ctrl.Rule(safetystatus['N'] & bestdirection['PM'], (ship_turn['PM'], ship_thrust['SF'], ship_mine['N']))
-        rule24 = ctrl.Rule(safetystatus['N'] & bestdirection['PS'], (ship_turn['PS'], ship_thrust['FF'], ship_mine['Y']))
-        rule25 = ctrl.Rule(safetystatus['N'] & bestdirection['Z'], (ship_thrust['FF'], ship_mine['Y']))
-        rule26 = ctrl.Rule(safetystatus['N'] & bestdirection['NS'], (ship_turn['NS'], ship_thrust['FF'], ship_mine['Y']))
-        rule27 = ctrl.Rule(safetystatus['N'] & bestdirection['NM'], (ship_turn['NM'], ship_thrust['SF'], ship_mine['N']))
-        rule28 = ctrl.Rule(safetystatus['N'] & bestdirection['NL'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
-        rule29 = ctrl.Rule(safetystatus['Y'], (ship_thrust['Z']))
+        rule22 = ctrl.Rule(currentrisk['L'] & safetystatus['N'] & bestdirection['PL'], (ship_turn['NS'], ship_thrust['FB'], ship_mine['Y']))
+        rule23 = ctrl.Rule(currentrisk['S'] & safetystatus['N'] & bestdirection['PL'], (ship_turn['NS'], ship_thrust['FB'], ship_mine['N']))
+        rule24 = ctrl.Rule(safetystatus['N'] & bestdirection['PM'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
+        rule25 = ctrl.Rule(safetystatus['N'] & bestdirection['PS'], (ship_turn['PS'], ship_thrust['Z'], ship_mine['N']))
+        rule26 = ctrl.Rule(safetystatus['N'] & bestdirection['Z'], (ship_thrust['FF'], ship_mine['Y']))
+        rule27 = ctrl.Rule(safetystatus['N'] & bestdirection['NS'], (ship_turn['NS'], ship_thrust['Z'], ship_mine['N']))
+        rule28 = ctrl.Rule(safetystatus['N'] & bestdirection['NM'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
+        rule29 = ctrl.Rule(currentrisk['S'] & safetystatus['N'] & bestdirection['NL'], (ship_turn['PS'], ship_thrust['FB'], ship_mine['N']))
+        rule30 = ctrl.Rule(currentrisk['L'] & safetystatus['N'] & bestdirection['NL'], (ship_turn['PS'], ship_thrust['FB'], ship_mine['Y']))
+        rule31 = ctrl.Rule(safetystatus['Y'] | currentrisk['S'], (ship_thrust['Z'], ship_mine['N']))
 
         #evade status rules:
-        rule_evade1 = ctrl.Rule(currentrisk['L'] | mine_distance['S'] | mine_distance['M'] | asteroid_time['S'], ship_evade['Y'])
+        rule_evade1 = ctrl.Rule(currentrisk['L'] | mine_distance['S'] | asteroid_time['S'], ship_evade['Y'])
         rule_evade2 = ctrl.Rule(currentrisk['S'] & mine_distance['L'] & asteroid_time['M'], ship_evade['N'])
         rule_evade3 = ctrl.Rule(currentrisk['S'] & mine_distance['L'] & asteroid_time['L'], ship_evade['N'])
+        rule_evade4 = ctrl.Rule(currentrisk['S'] & mine_distance['M'] & asteroid_time['M'], ship_evade['N'])
+        rule_evade5 = ctrl.Rule(currentrisk['S'] & mine_distance['M'] & asteroid_time['L'], ship_evade['N'])
 
         #fire rules:
         rule_fire1 = ctrl.Rule(shootasteroid['Y'], ship_fire['Y'])
@@ -243,6 +247,8 @@ class controller(KesslerController):
         self.targeting_control.addrule(rule27)
         self.targeting_control.addrule(rule28)
         self.targeting_control.addrule(rule29)
+        self.targeting_control.addrule(rule30)
+        self.targeting_control.addrule(rule31)
 
 
         #self.targeting_control.addrule(rule_thrust1)
@@ -255,6 +261,8 @@ class controller(KesslerController):
         self.evade_control.addrule(rule_evade1)
         self.evade_control.addrule(rule_evade2)
         self.evade_control.addrule(rule_evade3)
+        self.evade_control.addrule(rule_evade4)
+        self.evade_control.addrule(rule_evade5)
 
         self.fire_control = ctrl.ControlSystem()
         self.fire_control.addrule(rule_fire1)
@@ -513,9 +521,9 @@ class controller(KesslerController):
         rectsizey = mapsizey/gridsize
 
         #generate square grid
-        grid = [[{"mineexists": False, "asteroids_incoming": 0, "asteroids_time":  1000}for i in range(gridsize)] for j in range(gridsize)] 
-        safetygrid = [[0]*gridsize]*gridsize #this one will contain our actual ratings from fuzzy logic
-        minegrid = [[0]*gridsize]*gridsize #will contain a mine score (i.e. if a lot of asteroids are going to pass through this point)
+        grid = [[{"mineexists": False, "asteroids_incoming": 0, "asteroids_time":  1000, "nearest_asteroid":  1000}for i in range(gridsize)] for j in range(gridsize)] 
+        safetygrid = [[0 for i in range(gridsize)] for j in range(gridsize)] #this one will contain our actual ratings from fuzzy logic
+        minegrid = [[0 for i in range(gridsize)] for j in range(gridsize)]  #will contain a mine score (i.e. if a lot of asteroids are going to pass through this point)
 
         #return values
         currentrisk = 0 #weighted safety score; see below
@@ -580,6 +588,11 @@ class controller(KesslerController):
                     if grid[i][j]["asteroids_time"] > intersect_time:
                         grid[i][j]["asteroids_time"] = intersect_time
                     
+                    if grid[i][j]["nearest_asteroid"] > asteroid_dist:
+                        grid[i][j]["nearest_asteroid"] = asteroid_dist
+
+                        
+                    
 
                 #calculate safety grid values
                 #higher rating is worse
@@ -587,7 +600,7 @@ class controller(KesslerController):
                 #to add to neighbours as well; this method isn't precise, so make nearby squares also dangerous
                 neighbourfactor = 0
                 #neighbourfactor += (grid[i][j]["asteroids_time"]**-1)*5
-                #neighbourfactor += grid[i][j]["asteroids_incoming"]
+                neighbourfactor += grid[i][j]["asteroids_incoming"]
 
                 if grid[i][j]["mineexists"] == True:
                     #obviously if there is a mine the safe isn't safe, but it should also set nearby spaces to be unsafe aswell
@@ -631,10 +644,14 @@ class controller(KesslerController):
 
                 #other rating input:
                 safetygrid[i][j] += (grid[i][j]["asteroids_time"]**-1)*5
-                safetygrid[i][j] = safetygrid[i][j] + grid[i][j]["asteroids_incoming"]
+                safetygrid[i][j] += grid[i][j]["asteroids_incoming"]
+                safetygrid[i][j] += (grid[i][j]["nearest_asteroid"]**-1)*250
                 minegrid[i][j] = grid[i][j]["asteroids_incoming"]
 
-        """"""
+                #make the borders more scary since we aren't calculating asteroid math considering wrapping right now
+                if (i == 0) or (i == len(grid) - 1) or (j == 0) or (j == len(grid[i]) - 1):
+                    safetygrid[i][j] += 20
+        
         #find the mine status of the ship, there's probably a more efficient way of doing this but this works for now
         ship_pos_x = ship_state["position"][0]
         ship_pos_y = ship_state["position"][1]    
@@ -682,6 +699,7 @@ class controller(KesslerController):
         posxcount = 0
         negycount = 1
         posycount = 0
+
 
         for j in range(distanceeval+1):
             if j == 0: continue #we don't care about this case
@@ -731,7 +749,13 @@ class controller(KesslerController):
             lastval2 = sumval
             sumval = sumval + lastval 
             lastval = lastval2
-        
+
+        #DIRECTION RATINGS DEBUG
+        #print("Directions:")
+        #print(directionratings[0], directionratings[1], directionratings[2])
+        #print(directionratings[3], directionratings[4], directionratings[5])
+        #print(directionratings[6], directionratings[7], directionratings[8])    
+
         #find the best direction
         bestdirection = 4
         directionratings[4] = safetygrid[ship_pos_x][ship_pos_y]
@@ -745,9 +769,6 @@ class controller(KesslerController):
                 #currentsafety = -1 # our current position (4) is not the best option
 
         currentrisk = directionratings[4]*50/max(directionratings) #assign our current risk
-
-        if currentrisk < 1:#if we are near a mine the difference will be really small, and we need to get away
-            currentrisk = 50
 
         #convert best direction to radians
         match bestdirection:
@@ -788,6 +809,7 @@ class controller(KesslerController):
         elif bestdirection < -1*math.pi:
             bestdirection += 2*math.pi
         
+
         return currentrisk, currentmine, bestdirection
 
     
@@ -855,9 +877,8 @@ class controller(KesslerController):
 
         shooting.input['bullet_time'] = bullet_t
         shooting.input['theta_delta'] = shooting_theta
-        
+        shooting.input['currentrisk'] = currentrisk
         #shooting.input['asteroid_theta'] = asteroid_theta
-        
         shooting.input['safetystatus'] = safetystatus
         shooting.input['bestdirection'] = bestdirection
         firesim.input['shootasteroid'] = shootasteroid
@@ -904,7 +925,6 @@ class controller(KesslerController):
         """
         mine_value = outputs.get('ship_mine', -1.0)
         drop_mine = bool(mine_value >= 0)
-        drop_mine = False
 
         """
         evade_value = outputs.get('ship_evade', -1.0)
@@ -926,8 +946,8 @@ class controller(KesslerController):
         """
 
         #DEBUG
-        #print(f"safetystatus: {safetystatus}, bestdirection: {bestdirection}")
-        print(f"thrust: {thrust}, currentrisk: {currentrisk}, bestdirection: {bestdirection}, heading: {ship_state['heading']}")
+        print(f"safetystatus: {safetystatus}, bestdirection: {bestdirection}, currentrisk: {currentrisk}")
+        #print(f"thrust: {thrust}, currentrisk: {currentrisk}, bestdirection: {bestdirection}, heading: {ship_state['heading']}")
         #print(thrust, bullet_t, shooting_theta, turn_rate, fire)
         # THe games thrust sign is opposite of our convention so keep the - in front of thrust 
         return -thrust, turn_rate, fire, drop_mine
