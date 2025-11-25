@@ -35,7 +35,6 @@ class controller(KesslerController):
         mine_theta = ctrl.Antecedent(np.arange(-math.pi/30, math.pi/30, 0.1),'mine_theta') # This should be in radians
 
         currentrisk = ctrl.Antecedent(np.arange(0,50,0.1), 'currentrisk') #if our current space is safe (rating from 0-20)
-        safetystatus = ctrl.Antecedent(np.arange(-1,1,0.1), 'safetystatus') #if our current space is safe (boolean)
         currentmine = ctrl.Antecedent(np.arange(0,30,1), 'currentmine') #how many asteroids are going to hit where we are
         bestdirection = ctrl.Antecedent(np.arange(-math.pi/30,math.pi/30, 0.1), 'bestdirection') #direction with safest rating
         shootasteroid = ctrl.Antecedent(np.arange(-1,1,0.1), 'shootasteroid') #if we will hit an asteroid (boolean)
@@ -144,46 +143,44 @@ class controller(KesslerController):
         ship_mine['Y'] = fuzz.trimf(ship_mine.universe, [0.0,1,1])    
         ship_evade['N'] = fuzz.trimf(ship_evade.universe, [-1,-1,0.0])
         ship_evade['Y'] = fuzz.trimf(ship_evade.universe, [0.0,1,1])    
-        safetystatus['Y'] = fuzz.trimf(safetystatus.universe, [-1,-1,0.0])
-        safetystatus['N'] = fuzz.trimf(safetystatus.universe, [0.0,1,1])    
         shootasteroid['N'] = fuzz.trimf(shootasteroid.universe, [-1,-1,0.0])
         shootasteroid['Y'] = fuzz.trimf(shootasteroid.universe, [0.0,1,1])    
         
         #Declare each fuzzy rule
         #targeting algorithm rules
-        rule1 = ctrl.Rule(safetystatus['Y'] & bullet_time['L'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N'], ship_thrust['Z']))
-        rule2 = ctrl.Rule(safetystatus['Y'] & bullet_time['L'] & theta_delta['NM'], (ship_turn['NM'], ship_mine['N'], ship_thrust['Z']))
-        rule3 = ctrl.Rule(safetystatus['Y'] & bullet_time['L'] & theta_delta['NS'], (ship_turn['NS'], ship_mine['N'], ship_thrust['Z']))
-        # rule4 = ctrl.Rule(bullet_time['L'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
-        rule5 = ctrl.Rule(safetystatus['Y'] & bullet_time['L'] & theta_delta['PS'], (ship_turn['PS'], ship_mine['N'], ship_thrust['Z']))
-        rule6 = ctrl.Rule(safetystatus['Y'] & bullet_time['L'] & theta_delta['PM'], (ship_turn['PM'], ship_mine['N'], ship_thrust['Z']))
-        rule7 = ctrl.Rule(safetystatus['Y'] & bullet_time['L'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N'], ship_thrust['Z']))
-        rule8 = ctrl.Rule(safetystatus['Y'] & bullet_time['M'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N'], ship_thrust['Z']))
-        rule9 = ctrl.Rule(safetystatus['Y'] & bullet_time['M'] & theta_delta['NM'], (ship_turn['NM'], ship_mine['N'], ship_thrust['Z']))
-        rule10 = ctrl.Rule(safetystatus['Y'] & bullet_time['M'] & theta_delta['NS'], (ship_turn['NS'], ship_mine['N'], ship_thrust['Z']))
-        # rule11 = ctrl.Rule(bullet_time['M'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
-        rule12 = ctrl.Rule(safetystatus['Y'] & bullet_time['M'] & theta_delta['PS'], (ship_turn['PS'], ship_mine['N'], ship_thrust['Z']))
-        rule13 = ctrl.Rule(safetystatus['Y'] & bullet_time['M'] & theta_delta['PM'], (ship_turn['PM'], ship_mine['N'], ship_thrust['Z']))
-        rule14 = ctrl.Rule(safetystatus['Y'] & bullet_time['M'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N'], ship_thrust['Z']))
-        rule15 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N'], ship_thrust['Z']))
-        rule16 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['NM'], (ship_turn['NM'], ship_mine['N'], ship_thrust['Z']))
-        rule17 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['NS'], (ship_turn['NS'], ship_mine['N'], ship_thrust['Z']))
-        # rule18 = ctrl.Rule(bullet_time['S'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
-        rule19 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['PS'], (ship_turn['PS'], ship_mine['N'], ship_thrust['Z']))
-        rule20 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['PM'], (ship_turn['PM'], ship_mine['N'], ship_thrust['Z']))
-        rule21 = ctrl.Rule(safetystatus['Y'] & bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N'], ship_thrust['Z']))
+        rule_target1 = ctrl.Rule(bullet_time['L'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N']))
+        rule_target2 = ctrl.Rule(bullet_time['L'] & theta_delta['NM'], (ship_turn['NM'], ship_mine['N']))
+        rule_target3 = ctrl.Rule(bullet_time['L'] & theta_delta['NS'], (ship_turn['NS'], ship_mine['N']))
+        # rule_target4 = ctrl.Rule(bullet_time['L'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
+        rule_target5 = ctrl.Rule(bullet_time['L'] & theta_delta['PS'], (ship_turn['PS'], ship_mine['N']))
+        rule_target6 = ctrl.Rule(bullet_time['L'] & theta_delta['PM'], (ship_turn['PM'], ship_mine['N']))
+        rule_target7 = ctrl.Rule(bullet_time['L'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N']))
+        rule_target8 = ctrl.Rule(bullet_time['M'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N']))
+        rule_target9 = ctrl.Rule(bullet_time['M'] & theta_delta['NM'], (ship_turn['NM'], ship_mine['N']))
+        rule_target10 = ctrl.Rule(bullet_time['M'] & theta_delta['NS'], (ship_turn['NS'], ship_mine['N']))
+        # rule_target11 = ctrl.Rule(bullet_time['M'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
+        rule_target12 = ctrl.Rule(bullet_time['M'] & theta_delta['PS'], (ship_turn['PS'], ship_mine['N']))
+        rule_target13 = ctrl.Rule(bullet_time['M'] & theta_delta['PM'], (ship_turn['PM'], ship_mine['N']))
+        rule_target14 = ctrl.Rule(bullet_time['M'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N']))
+        rule_target15 = ctrl.Rule(bullet_time['S'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N']))
+        rule_target16 = ctrl.Rule(bullet_time['S'] & theta_delta['NM'], (ship_turn['NM'], ship_mine['N']))
+        rule_target17 = ctrl.Rule(bullet_time['S'] & theta_delta['NS'], (ship_turn['NS'], ship_mine['N']))
+        # rule_target18 = ctrl.Rule(bullet_time['S'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
+        rule_target19 = ctrl.Rule(bullet_time['S'] & theta_delta['PS'], (ship_turn['PS'], ship_mine['N']))
+        rule_target20 = ctrl.Rule(bullet_time['S'] & theta_delta['PM'], (ship_turn['PM'], ship_mine['N']))
+        rule_target21 = ctrl.Rule(bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_mine['N']))
      
         #evade movement rules/thrust rules
-        rule22 = ctrl.Rule(currentrisk['L'] & safetystatus['N'] & bestdirection['PL'], (ship_turn['NS'], ship_thrust['FB'], ship_mine['Y']))
-        rule23 = ctrl.Rule(currentrisk['S'] & safetystatus['N'] & bestdirection['PL'], (ship_turn['NS'], ship_thrust['FB'], ship_mine['N']))
-        rule24 = ctrl.Rule(safetystatus['N'] & bestdirection['PM'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
-        rule25 = ctrl.Rule(safetystatus['N'] & bestdirection['PS'], (ship_turn['PS'], ship_thrust['FF'], ship_mine['N']))
-        rule26 = ctrl.Rule(safetystatus['N'] & bestdirection['Z'], (ship_thrust['FF'], ship_mine['Y']))
-        rule27 = ctrl.Rule(safetystatus['N'] & bestdirection['NS'], (ship_turn['NS'], ship_thrust['FF'], ship_mine['N']))
-        rule28 = ctrl.Rule(safetystatus['N'] & bestdirection['NM'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
-        rule29 = ctrl.Rule(currentrisk['S'] & safetystatus['N'] & bestdirection['NL'], (ship_turn['PS'], ship_thrust['FB'], ship_mine['N']))
-        rule30 = ctrl.Rule(currentrisk['L'] & safetystatus['N'] & bestdirection['NL'], (ship_turn['PS'], ship_thrust['FB'], ship_mine['Y']))
-        rule31 = ctrl.Rule(safetystatus['Y'] | currentrisk['S'], (ship_thrust['Z'], ship_mine['N']))
+        rule_move1 = ctrl.Rule(currentrisk['L'] & bestdirection['PL'], (ship_turn['NS'], ship_thrust['FB'], ship_mine['Y']))
+        rule_move2 = ctrl.Rule(currentrisk['S'] & bestdirection['PL'], (ship_turn['NS'], ship_thrust['FB'], ship_mine['N']))
+        rule_move3 = ctrl.Rule(bestdirection['PM'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
+        rule_move4 = ctrl.Rule(bestdirection['PS'], (ship_turn['PS'], ship_thrust['FF'], ship_mine['N']))
+        rule_move5 = ctrl.Rule(bestdirection['Z'], (ship_thrust['FF'], ship_mine['Y']))
+        rule_move6 = ctrl.Rule(bestdirection['NS'], (ship_turn['NS'], ship_thrust['FF'], ship_mine['N']))
+        rule_move7 = ctrl.Rule(bestdirection['NM'], (ship_turn['NL'], ship_thrust['Z'], ship_mine['N']))
+        rule_move8 = ctrl.Rule(currentrisk['S'] & bestdirection['NL'], (ship_turn['PS'], ship_thrust['FB'], ship_mine['N']))
+        rule_move9 = ctrl.Rule(currentrisk['L'] & bestdirection['NL'], (ship_turn['PS'], ship_thrust['FB'], ship_mine['Y']))
+        rule_move10 = ctrl.Rule(currentrisk['S'], (ship_thrust['Z'], ship_mine['N']))
 
         #evade status rules:
         rule_evade1 = ctrl.Rule(currentrisk['L'] | mine_distance['S'] | asteroid_time['S'], ship_evade['Y'])
@@ -217,38 +214,40 @@ class controller(KesslerController):
         # self.targeting_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9, rule10, rule11, rule12, rule13, rule14, rule15])
              
         self.targeting_control = ctrl.ControlSystem()
-        self.targeting_control.addrule(rule1)
-        self.targeting_control.addrule(rule2)
-        self.targeting_control.addrule(rule3)
-        # self.targeting_control.addrule(rule4)
-        self.targeting_control.addrule(rule5)
-        self.targeting_control.addrule(rule6)
-        self.targeting_control.addrule(rule7)
-        self.targeting_control.addrule(rule8)
-        self.targeting_control.addrule(rule9)
-        self.targeting_control.addrule(rule10)
-        # self.targeting_control.addrule(rule11)
-        self.targeting_control.addrule(rule12)
-        self.targeting_control.addrule(rule13)
-        self.targeting_control.addrule(rule14)
-        self.targeting_control.addrule(rule15)
-        self.targeting_control.addrule(rule16)
-        self.targeting_control.addrule(rule17)
-        # self.targeting_control.addrule(rule18)
-        self.targeting_control.addrule(rule19)
-        self.targeting_control.addrule(rule20)
-        self.targeting_control.addrule(rule21)
+        self.targeting_control.addrule(rule_target1)
+        self.targeting_control.addrule(rule_target2)
+        self.targeting_control.addrule(rule_target3)
+        # self.targeting_control.addrule(rule_target4)
+        self.targeting_control.addrule(rule_target5)
+        self.targeting_control.addrule(rule_target6)
+        self.targeting_control.addrule(rule_target7)
+        self.targeting_control.addrule(rule_target8)
+        self.targeting_control.addrule(rule_target9)
+        self.targeting_control.addrule(rule_target10)
+        # self.targeting_control.addrule(rule_target11)
+        self.targeting_control.addrule(rule_target12)
+        self.targeting_control.addrule(rule_target13)
+        self.targeting_control.addrule(rule_target14)
+        self.targeting_control.addrule(rule_target15)
+        self.targeting_control.addrule(rule_target16)
+        self.targeting_control.addrule(rule_target17)
+        # self.targeting_control.addrule(rule_target18)
+        self.targeting_control.addrule(rule_target19)
+        self.targeting_control.addrule(rule_target20)
+        self.targeting_control.addrule(rule_target21)
 
-        self.targeting_control.addrule(rule22)
-        self.targeting_control.addrule(rule23)
-        self.targeting_control.addrule(rule24)
-        self.targeting_control.addrule(rule25)
-        self.targeting_control.addrule(rule26)
-        self.targeting_control.addrule(rule27)
-        self.targeting_control.addrule(rule28)
-        self.targeting_control.addrule(rule29)
-        self.targeting_control.addrule(rule30)
-        self.targeting_control.addrule(rule31)
+        self.movement_control = ctrl.ControlSystem()
+        self.movement_control.addrule(rule_move1)
+        self.movement_control.addrule(rule_move2)
+        self.movement_control.addrule(rule_move3)
+        self.movement_control.addrule(rule_move4)
+        self.movement_control.addrule(rule_move5)
+        self.movement_control.addrule(rule_move6)
+        self.movement_control.addrule(rule_move7)
+        self.movement_control.addrule(rule_move8)
+        self.movement_control.addrule(rule_move9)
+        self.movement_control.addrule(rule_move10)
+
 
 
         #self.targeting_control.addrule(rule_thrust1)
@@ -858,11 +857,9 @@ class controller(KesslerController):
         asteroid_t, asteroid_theta = self.asteroid_calc(ship_state, game_state)
         mine_distance, mine_theta = self.mine_calc(ship_state,game_state)
         currentrisk, currentmine, bestdirection = self.rect_calc(ship_state,game_state)
-        
         shootasteroid = self.asteroid_hit_calc(ship_state, game_state)
         
         # Pass the inputs to the rulebase and fire it
-        shooting = ctrl.ControlSystemSimulation(self.targeting_control,flush_after_run=1)
         evading = ctrl.ControlSystemSimulation(self.evade_control,flush_after_run=1)
         firesim = ctrl.ControlSystemSimulation(self.fire_control,flush_after_run=1)
 
@@ -871,35 +868,38 @@ class controller(KesslerController):
         evading.input['asteroid_time'] = asteroid_t
         evading.input['mine_distance'] = mine_distance
         evading.compute()
+
         safetystatus = evading.output['ship_evade']
-        #clamp safety status
-        if safetystatus < 0: safetystatus = -1
-        elif safetystatus >= 0: safetystatus = 1
 
-        shooting.input['bullet_time'] = bullet_t
-        shooting.input['theta_delta'] = shooting_theta
-        shooting.input['currentrisk'] = currentrisk
-        #shooting.input['asteroid_theta'] = asteroid_theta
-        shooting.input['safetystatus'] = safetystatus
-        shooting.input['bestdirection'] = bestdirection
-        firesim.input['shootasteroid'] = shootasteroid
+        #target or move based on safety status
+        if safetystatus < 0:
+            shooting = ctrl.ControlSystemSimulation(self.targeting_control,flush_after_run=1)
+            shooting.input['bullet_time'] = bullet_t
+            shooting.input['theta_delta'] = shooting_theta
+            shooting.compute()
+            outputs = shooting.output
+            raw_thrust = 0
 
-        #shooting.input['mine_theta'] = mine_theta
+        elif safetystatus >= 0:
+            movement = ctrl.ControlSystemSimulation(self.movement_control,flush_after_run=1)
+            movement.input['currentrisk'] = currentrisk
+            movement.input['bestdirection'] = bestdirection
+            movement.compute()
+            outputs = movement.output
+            raw_thrust = float(outputs.get('ship_thrust', 0.0))
         
-        # drop_mine = False
-        shooting.compute()
-        outputs = shooting.output
+        
 
         turn_rate = float(outputs.get('ship_turn', 0.0))
 
+        #test if we should fire
+        firesim.input['shootasteroid'] = shootasteroid
         firesim.compute()
         fireoutput = firesim.output
 
         fire_value = fireoutput.get('ship_fire', -1.0)
         fire = bool(fire_value >= 0)
 
-        
-        raw_thrust = float(outputs.get('ship_thrust', 0.0))
         raw_thrust *= 0.3
         MAX_THRUST = 1000.0
         thrust = max(-MAX_THRUST, min(MAX_THRUST, raw_thrust))
