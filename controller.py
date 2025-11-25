@@ -858,6 +858,7 @@ class controller(KesslerController):
         asteroid_t, asteroid_theta = self.asteroid_calc(ship_state, game_state)
         mine_distance, mine_theta = self.mine_calc(ship_state,game_state)
         currentrisk, currentmine, bestdirection = self.rect_calc(ship_state,game_state)
+        
         shootasteroid = self.asteroid_hit_calc(ship_state, game_state)
         
         # Pass the inputs to the rulebase and fire it
