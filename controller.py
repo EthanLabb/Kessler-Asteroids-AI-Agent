@@ -7,7 +7,7 @@ from pickle import FALSE
 # Please see the Kessler Game Development Guide by Dr. Scott Dick for a
 #   detailed discussion of this source code.
 
-from kesslergame import KesslerController # In Eclipse, the name of the library is kesslergame, not src.kesslergame
+from kesslergame import Scenario, KesslerController, KesslerGame, GraphicsType, TrainerEnvironment # In Eclipse, the name of the library is kesslergame, not src.kesslergame
 from typing import Dict, Tuple
 from cmath import sqrt
 import skfuzzy as fuzz
@@ -16,12 +16,27 @@ import math
 import numpy as np
 import matplotlib as plt
 import EasyGA
+import random
+import time
+NUM_GENES = 12
+MIN_WEIGHT = 0.0
+MAX_WEIGHT = 1.0
+game_num = [1]
 
+def three_sorted_points(min_val, max_val, g0, g1, g2):
+        pts = [
+            min_val + g0 * (max_val - min_val),
+            min_val + g1 * (max_val - min_val),
+            min_val + g2 * (max_val - min_val),
+        ]
+        pts.sort()
+        return pts[0], pts[1], pts[2]
 class controller(KesslerController):
         
-    def __init__(self):
+    def __init__(self, mf_chromosome=None):
         self.eval_frames = 0 # How many frames have been evaluated thus far (a counter). It doesnt really get used yet but we could use it for stats later if we want
         self.framecounter = 15
+        self.mf_chromosome = mf_chromosome
 
         # self.targeting_control is the targeting rulebase, which is static in this controller.      
         # Declare variables
@@ -146,6 +161,70 @@ class controller(KesslerController):
         shootasteroid['N'] = fuzz.trimf(shootasteroid.universe, [-1,-1,0.0])
         shootasteroid['Y'] = fuzz.trimf(shootasteroid.universe, [0.0,1,1])    
         
+
+        if self.mf_chromosome is not None:
+            
+            g0, g1, g2 = mf_chromosome[0], mf_chromosome[1], mf_chromosome[2]
+            t1, t2, t3 = three_sorted_points(0.2, 5.0, g0, g1, g2)
+
+            asteroid_time['S'] = fuzz.trimf(asteroid_time.universe, [0.0, 0.0, t1])
+            asteroid_time['M'] = fuzz.trimf(asteroid_time.universe, [t1, t2, t3])
+            asteroid_time['L'] = fuzz.smf(asteroid_time.universe, t2, 10.0)
+
+
+            g3, g4, g5 = mf_chromosome[3], mf_chromosome[4], mf_chromosome[5]
+            r1, r2, r3 = three_sorted_points(0.0, 50.0, g3, g4, g5)
+
+            # Safe up to around r2
+            currentrisk['S'] = fuzz.trimf(currentrisk.universe, [0.0, 0.0, r2])
+
+            # High risk from around r1 upwards
+            currentrisk['L'] = fuzz.trimf(currentrisk.universe, [r1, 50.0, 50.0])
+            
+
+
+            g6, g7, g8 = mf_chromosome[6], mf_chromosome[7], mf_chromosome[8]
+            d1, d2, d3 = three_sorted_points(100.0, 1200.0, g6, g7, g8)
+
+            mine_distance['S'] = fuzz.zmf(mine_distance.universe, d1, d2)
+            mine_distance['M'] = fuzz.trimf(mine_distance.universe, [0.0, d2, d3])
+            mine_distance['L'] = fuzz.smf(mine_distance.universe, d3, 2000.0)
+
+
+            g9, g10, g11 = mf_chromosome[9], mf_chromosome[10], mf_chromosome[11]
+
+            # Zero band half-width in [50, 250]
+            zero_half_width = 50.0 + g9 * 200.0
+
+            # Backward (positive) thrust scale [600, 1000]
+            backward_max = 600.0 + g10 * 400.0
+
+            # Forward (negative) thrust scale [600, 1000]
+            forward_max = 600.0 + g11 * 400.0
+
+            # Zero (small thrust)
+            ship_thrust['Z']  = fuzz.trimf(ship_thrust.universe,
+                                        [-zero_half_width, 0.0, zero_half_width])
+
+            # Forward thrust (negative values)
+            ship_thrust['FF'] = fuzz.trimf(ship_thrust.universe,
+                                        [-1000.0, -1000.0, -forward_max])
+            ship_thrust['MF'] = fuzz.trimf(ship_thrust.universe,
+                                        [-1000.0, -forward_max, -0.5 * forward_max])
+            ship_thrust['SF'] = fuzz.trimf(ship_thrust.universe,
+                                        [-forward_max, -0.5 * forward_max, 0.0])
+
+            # Backward thrust (positive values)
+            ship_thrust['SB'] = fuzz.trimf(ship_thrust.universe,
+                                        [0.0, 0.5 * backward_max, backward_max])
+            ship_thrust['MB'] = fuzz.trimf(ship_thrust.universe,
+                                        [0.5 * backward_max, backward_max, backward_max])
+            ship_thrust['FB'] = fuzz.trimf(ship_thrust.universe,
+                                        [backward_max, 1000.0, 1000.0])
+
+
+
+
         #Declare each fuzzy rule
         #targeting algorithm rules
         rule_target1 = ctrl.Rule(bullet_time['L'] & theta_delta['NL'], (ship_turn['NL'], ship_mine['N']))
@@ -207,12 +286,6 @@ class controller(KesslerController):
         #ship_turn.view()
         #ship_fire.view()
      
-     
-        
-        # Declare the fuzzy controller, add the rules 
-        # This is an instance variable, and thus available for other methods in the same object. See notes.                         
-        # self.targeting_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9, rule10, rule11, rule12, rule13, rule14, rule15])
-             
         self.targeting_control = ctrl.ControlSystem()
         self.targeting_control.addrule(rule_target1)
         self.targeting_control.addrule(rule_target2)
@@ -267,6 +340,9 @@ class controller(KesslerController):
         self.fire_control.addrule(rule_fire1)
         self.fire_control.addrule(rule_fire2)
 
+
+
+    
     # Helper functions
     def get_closest_asteroid(self, ship_state: Dict, game_state: Dict):
         ship_pos_x = ship_state["position"][0]     # See src/kesslergame/ship.py in the KesslerGame Github
@@ -905,14 +981,14 @@ class controller(KesslerController):
         thrust = max(-MAX_THRUST, min(MAX_THRUST, raw_thrust))
 
         #help ship come to a stop since the fuzzy logic doesn't really consider drifting too well
-        if (thrust < 50 and thrust > -50 and abs(ship_state['speed']) > 10):
-            if ship_state['speed'] < 0:
-                thrust = -1000
-            else:
-                thrust = 1000
+        # if (thrust < 50 and thrust > -50 and abs(ship_state['speed']) > 10):
+        #     if ship_state['speed'] < 0:
+        #         thrust = -1000
+        #     else:
+        #         thrust = 1000
 
 
-        """
+        
         # If asteroid is approaching soon
         if asteroid_t < 2.0:
             # And it's mostly behind us (more than 90 degrees off the nose)
@@ -920,10 +996,10 @@ class controller(KesslerController):
                 # We want to move forward in this case
                 thrust = -abs(thrust) if thrust != 0 else -150.0
 
-        # # If no asteroid is near barely move
-        # if asteroid_t > 5.0:
-        #     thrust *= 0.2
-        """
+        # If no asteroid is near barely move
+        if asteroid_t > 5.0:
+            thrust *= 0.2
+        
         mine_value = outputs.get('ship_mine', -1.0)
         drop_mine = bool(mine_value >= 0)
 
@@ -947,7 +1023,7 @@ class controller(KesslerController):
         """
 
         #DEBUG
-        print(f"safetystatus: {safetystatus}, bestdirection: {bestdirection}, currentrisk: {currentrisk}")
+        # print(f"safetystatus: {safetystatus}, bestdirection: {bestdirection}, currentrisk: {currentrisk}")
         #print(f"thrust: {thrust}, currentrisk: {currentrisk}, bestdirection: {bestdirection}, heading: {ship_state['heading']}")
         #print(thrust, bullet_t, shooting_theta, turn_rate, fire)
         # THe games thrust sign is opposite of our convention so keep the - in front of thrust 
@@ -956,3 +1032,103 @@ class controller(KesslerController):
     @property
     def name(self) -> str:
         return "Controller"
+    
+if __name__ == '__main__':
+
+    print("Starting Genetic Algorithm Optimization...")
+
+    # --- GA gene / chromosome generation ---
+
+    def generate_random_gene():
+        # Single MF gene in [0,1]
+        return random.uniform(0.0, 1.0)
+
+    def generate_random_chromosome():
+        # Return a Python list of 12 floats
+        return [generate_random_gene() for _ in range(NUM_GENES)]
+
+    # --- Scenario for GA training ---
+
+    ga_training_scenario = Scenario(
+        name='GA Training Scenario',
+        num_asteroids=10,
+        ship_states=[
+            {'position': (400, 400), 'angle': 90, 'lives': 3, 'team': 1, "mines_remaining": 3},
+        ],
+        map_size=(1000, 800),
+        time_limit=60,
+        ammo_limit_multiplier=0,
+        stop_if_no_ammo=False
+    )
+
+    # Use TrainerEnvironment for speed (no graphics)
+    ga_game_settings = {'perf_tracker': True,
+                 'graphics_type': GraphicsType.Tkinter,
+                 'realtime_multiplier': 2,
+                 'graphics_obj': None,
+                 'frequency': 30}
+
+    # --- Fitness function ---
+
+    def kessler_fitness(chromosome):
+        # Convert Gene objects to list of floats
+        runs_per_chromosome = 4
+        total_cost = 0.0
+        mf_list = [gene.value for gene in chromosome]
+
+
+   
+        for _ in range(runs_per_chromosome):
+            env = TrainerEnvironment(settings=ga_game_settings)
+            ctrlr = controller(mf_chromosome=mf_list)
+
+            pre = time.perf_counter()
+            score, perf = env.run(scenario=ga_training_scenario, controllers=[ctrlr])
+            print(f"Finished game #{game_num[0]}")
+            game_num[0] += 1
+            alive_time = time.perf_counter()-pre
+            # print('Scenario eval time: '+str(alive_time))
+            team = score.teams[0]
+
+            deaths = team.deaths
+            asteroids_hit = team.asteroids_hit
+
+            # Minimize
+            cost = (
+                asteroids_hit
+            )
+            total_cost += cost
+        return total_cost / runs_per_chromosome
+
+    ga = EasyGA.GA()
+    ga.chromosome_length = NUM_GENES
+    ga.population_size = 2       # can raise for overnight
+    ga.max_generations  = 1      # can also raise
+    ga.generation_goal = 2
+    ga.target_fitness_type = 'max'
+
+    # Either use chromosome_impl OR gene_impl; pick ONE pattern.
+    # Simpler: use gene_impl + chromosome_length
+    ga.gene_impl = generate_random_gene
+    # (You can delete ga.chromosome_impl if set earlier.)
+    ga.fitness_function_impl = kessler_fitness
+
+    print("Starting GA to tune MFs...")
+    start = time.time()
+    ga.evolve()
+    elapsed = time.time() - start
+    print(f"GA finished in {elapsed:.1f} seconds")
+
+    ga.sort_by_best_fitness()
+    print("\n=== TOP 10 CHROMOSOMES (HIGHEST COST FIRST) ===")
+    for rank, chrom in enumerate(ga.population[:20], start=1):
+        genes = [gene.value for gene in chrom]
+        print(f"\nRank {rank}: Fitness (cost) = {chrom.fitness:.3f}")
+        print("Genes:", genes)
+
+
+    best = ga.population[0]
+    best_genes = [g.value for g in best]
+    print("\n=== BEST CHROMOSOME OVERALL ===")
+    print("Best fitness (cost):", best.fitness)
+    print("Best genes:", best_genes)
