@@ -1002,7 +1002,6 @@ class controller(KesslerController):
         
         mine_value = outputs.get('ship_mine', -1.0)
         drop_mine = bool(mine_value >= 0)
-        drop_mine = False
 
         """
         evade_value = outputs.get('ship_evade', -1.0)
@@ -1065,7 +1064,7 @@ if __name__ == '__main__':
     # Use TrainerEnvironment for speed (no graphics)
     ga_game_settings = {'perf_tracker': True,
                  'graphics_type': GraphicsType.Tkinter,
-                 'realtime_multiplier': 1,
+                 'realtime_multiplier': 2,
                  'graphics_obj': None,
                  'frequency': 30}
 
@@ -1096,9 +1095,7 @@ if __name__ == '__main__':
 
             # Minimize
             cost = (
-                deaths * 2000.0
-                - asteroids_hit * 100.0 
-                - alive_time * 200
+                asteroids_hit
             )
             total_cost += cost
         return total_cost / runs_per_chromosome
@@ -1108,7 +1105,7 @@ if __name__ == '__main__':
     ga.population_size = 2       # can raise for overnight
     ga.max_generations  = 1      # can also raise
     ga.generation_goal = 2
-    ga.target_fitness_type = 'min'
+    ga.target_fitness_type = 'max'
 
     # Either use chromosome_impl OR gene_impl; pick ONE pattern.
     # Simpler: use gene_impl + chromosome_length
@@ -1123,7 +1120,7 @@ if __name__ == '__main__':
     print(f"GA finished in {elapsed:.1f} seconds")
 
     ga.sort_by_best_fitness()
-    print("\n=== TOP 10 CHROMOSOMES (LOWEST COST FIRST) ===")
+    print("\n=== TOP 10 CHROMOSOMES (HIGHEST COST FIRST) ===")
     for rank, chrom in enumerate(ga.population[:20], start=1):
         genes = [gene.value for gene in chrom]
         print(f"\nRank {rank}: Fitness (cost) = {chrom.fitness:.3f}")
