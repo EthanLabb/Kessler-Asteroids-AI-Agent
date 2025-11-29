@@ -22,11 +22,10 @@ NUM_GENES = 12
 MIN_WEIGHT = 0.0
 MAX_WEIGHT = 1.0
 game_num = [1]
-dropped = [False]
-# best_performant_gene = [0.38165532615816133, 0.5201906573958109, 0.0702414421170473, 0.9282002333372678, 0.6270820775828427, 0.7057576451435551, 0.8303841699772108, 0.667423207300158, 0.0037557414991299387, 0.05438109654476053, 0.2418623485228083, 0.8145511142872612]
+best_performant_gene = [0.38165532615816133, 0.5201906573958109, 0.0702414421170473, 0.9282002333372678, 0.6270820775828427, 0.7057576451435551, 0.8303841699772108, 0.667423207300158, 0.0037557414991299387, 0.05438109654476053, 0.2418623485228083, 0.8145511142872612]
 # best_performant_gene = [0] * 12
 
-# best_performant_gene = [0.4379180777472249, 0.9952509218195709, 0.17787502041467318, 0.6215921943623172, 0.9990846232862002, 0.325468351954204, 0.3602599701776187, 0.10551112051253586, 0.4712472481710801, 0.812824136070951, 0.2418623485228083, 0.3660646261681145]
+best_performant_gene = [0.4379180777472249, 0.9952509218195709, 0.17787502041467318, 0.6215921943623172, 0.9990846232862002, 0.325468351954204, 0.3602599701776187, 0.10551112051253586, 0.4712472481710801, 0.812824136070951, 0.2418623485228083, 0.3660646261681145]
 def three_sorted_points(min_val, max_val, g0, g1, g2):
         pts = [
             min_val + g0 * (max_val - min_val),
@@ -679,9 +678,9 @@ class controller(KesslerController):
             ax = a["position"][0]
             ay = a["position"][1]
             
-            # New crowding penalty 
+            # --- NEW: CROWDING / DENSITY PENALTY ---
             # Even if it's not hitting us, we don't want to be near it.
-            # Find which grid cell the asteroid is in
+            # Find which grid cell the asteroid is in:
             gx = int(ax // rectsizex) % gridsize
             gy = int(ay // rectsizey) % gridsize
             
@@ -875,12 +874,13 @@ class controller(KesslerController):
         drop_mine = False
 
         # 3. Branch Behavior based on Safety
-        if safetystatus >= 0.5: 
+        if safetystatus >= 20: 
             # --- UNSAFE: EVADE MODE ---
             # Use movement_control to find best escape route
             movement = ctrl.ControlSystemSimulation(self.movement_control, flush_after_run=1)
             movement.input['currentrisk'] = currentrisk
             movement.input['bestdirection'] = bestdirection
+            # REMOVED: movement.input['safetystatus'] = safetystatus  <-- CAUSES ERROR
             movement.compute()
             
             outputs = movement.output
@@ -890,10 +890,6 @@ class controller(KesslerController):
             # Check if we should drop a mine while running
             mine_val = float(outputs.get('ship_mine', -1.0))
             drop_mine = (mine_val >= 0)
-            if not dropped[0]:
-                dropped[0] = True
-            else:
-                drop_mine = False
             
             # Don't fire while running for your life
             fire = False
@@ -904,56 +900,58 @@ class controller(KesslerController):
             shooting = ctrl.ControlSystemSimulation(self.targeting_control, flush_after_run=1)
             shooting.input['bullet_time'] = bullet_t
             shooting.input['theta_delta'] = shooting_theta
+            # REMOVED: shooting.input['safetystatus'] = safetystatus <-- CAUSES ERROR
             shooting.compute()
             
             outputs = shooting.output
             turn_rate = float(outputs.get('ship_turn', 0.0))
+            thrust = 0.0 # Stay still to aim better
             
-            # If we need to turn a lot, STOP moving to turn faster (Minimize Movement).
-            # If we are aimed well (small angle), move forward slowly (Ability to Move).
-            if abs(shooting_theta) < 0.1: # 5 degrees
-                thrust = -150.0 
-            else:
-                # Aiming bad -> Stop to rotate in place
-                thrust = 0.0
-            
-            # Smart Turn Override
-            if abs(shooting_theta) > 0.05 and abs(turn_rate) < 10.0: 
-                if shooting_theta > 0:
-                    turn_rate = 180.0 # Turn Right
-                else:
-                    turn_rate = -180.0 # Turn Left
+            # threshold: 1 degree (approx 0.017 radians)
+            if abs(shooting_theta) > 0.017: 
+                if abs(turn_rate) < 10.0: # If fuzzy is being lazy
+                    # Force a turn in the correct direction
+                    if shooting_theta > 0:
+                        turn_rate = 180.0 # Turn Right/CW
+                    else:
+                        turn_rate = -180.0 # Turn Left/CCW
 
-            # Fire Logic
+            # Only calculate fire logic if we are safe and targeting
             firesim = ctrl.ControlSystemSimulation(self.fire_control, flush_after_run=1)
             firesim.input['shootasteroid'] = shootasteroid
             firesim.compute()
             fire_val = firesim.output.get('ship_fire', -1.0)
-            fire = bool(fire_val >= 0)
+            fire = bool(fire_val >= 0)  # <-- Forces standard Python bool
             drop_mine = False
 
+        # 4. Clean up Thrust Values
         # Scale down raw fuzzy output
         thrust *= 0.3 
         MAX_THRUST = 1000.0
         thrust = max(-MAX_THRUST, min(MAX_THRUST, thrust))
 
-        # --- EMERGENCY COLLISION-AVOIDANCE OVERRIDE ---
-        if asteroid_t < 1.0 and abs(asteroid_theta) < (math.pi / 4):
-            if asteroid_theta >= 0:
-                turn_rate = -180.0
+        # 5. EMERGENCY OVERRIDE (The "Anti-Crash" Layer)
+        # If an asteroid is imminent (< 1.5s), ignore fuzzy logic and hard evade.
+        if asteroid_t < 1.5 and asteroid_t > 0:
+            # Turn opposite to the asteroid
+            if asteroid_theta > 0:
+                turn_rate = -180.0 # Turn Right
             else:
-                turn_rate = 180.0
-            # Big backward thrust (positive thrust here = reverse)
-            thrust = 800.0
-
-        # MODIFIED: Only kill thrust if we are turning hard. 
-        # Removed "asteroid_t > 3" check because it often freezes the ship if no collision is imminent.
-        if asteroid_t > 3:
-            thrust = 0
-        if abs(turn_rate) > 120.0:
-            thrust = 0.0
+                turn_rate = 180.0  # Turn Left
             
-        return -thrust, turn_rate, True, drop_mine
+            # Thrust forward (Negative is forward in your fuzzy set definitions)
+            thrust = -1000.0 
+            fire = False
+            drop_mine = True
+
+        # 6. Idle Power Save
+        # If extremely safe, kill thrust to prevent drift
+        if asteroid_t > 3:
+            thrust = 0.0
+
+        # Return (Note: Game expects Positive thrust = Forward, but your fuzzy sets 
+        # defined Forward as Negative. So we return -thrust to flip it correct)
+        return -thrust, turn_rate, fire, False
 
     @property
     def name(self) -> str:
